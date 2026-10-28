@@ -4,8 +4,11 @@ from django.db import transaction
 from django.db.models import Avg
 from rest_framework import serializers
 
-from .models import Review, Route, Waypoint
+from .models import Photo, Review, Route, Waypoint
 from .sanitize import clean_required, clean_text
+
+MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5 MB
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -46,9 +49,24 @@ class ReviewSerializer(serializers.ModelSerializer):
         return clean_required(value)
 
 
+class PhotoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Photo
+        fields = ["id", "image"]
+
+    def validate_image(self, value):
+        if value.size > MAX_IMAGE_SIZE:
+            raise serializers.ValidationError("Снимката е твърде голяма (максимум 5 MB).")
+        # типът идва от Pillow, който реално отваря файла, а не от името или от заглавката на браузъра
+        if getattr(value, "content_type", None) not in ALLOWED_IMAGE_TYPES:
+            raise serializers.ValidationError("Позволени са само JPEG, PNG и WebP.")
+        return value
+
+
 class RouteSerializer(serializers.ModelSerializer):
     author = serializers.ReadOnlyField(source="author.username")
     waypoints = WaypointSerializer(many=True, allow_empty=False)
+    photos = PhotoSerializer(many=True, read_only=True)
     average_rating = serializers.SerializerMethodField()
     reviews_count = serializers.SerializerMethodField()
 
@@ -56,7 +74,7 @@ class RouteSerializer(serializers.ModelSerializer):
         model = Route
         fields = [
             "id", "title", "destination", "description", "tips",
-            "author", "created_at", "waypoints",
+            "author", "created_at", "waypoints", "photos",
             "average_rating", "reviews_count",
         ]
         read_only_fields = ["id", "created_at"]

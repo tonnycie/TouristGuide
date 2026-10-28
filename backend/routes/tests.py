@@ -1,7 +1,15 @@
 from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
-from .models import Review, Route, Waypoint
+import shutil
+import tempfile
+from io import BytesIO
+from unittest.mock import patch
 
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
+from PIL import Image
+
+from .models import Photo, Review, Route, Waypoint
 
 class AuthTests(APITestCase):
     def test_register_and_login(self):
@@ -221,3 +229,92 @@ class ReviewApiTests(APITestCase):
         for field in ("title", "destination", "description", "tips"):
             self.assertNotIn("<", r.data[field])
         self.assertNotIn("<", r.data["waypoints"][0]["name"])           
+
+
+def make_image(name="test.png", fmt="PNG", content_type="image/png"):
+    buffer = BytesIO()
+    Image.new("RGB", (10, 10), "red").save(buffer, fmt)
+    return SimpleUploadedFile(name, buffer.getvalue(), content_type=content_type)
+
+
+TEMP_MEDIA = tempfile.mkdtemp()  # тестовите снимки не замърсяват папката media
+
+
+@override_settings(MEDIA_ROOT=TEMP_MEDIA)
+class PhotoApiTests(APITestCase):
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        shutil.rmtree(TEMP_MEDIA, ignore_errors=True)
+
+    def setUp(self):
+        self.ivan = User.objects.create_user("ivan", password="Tur1st!Pass2026")
+        self.maria = User.objects.create_user("maria", password="Tur1st!Pass2026")
+        self.route = Route.objects.create(author=self.ivan, title="Рила", destination="Рила")
+        Waypoint.objects.create(route=self.route, name="Паничище", latitude=42.2686, longitude=23.317)
+        self.url = f"/api/routes/{self.route.id}/photos/"
+
+    def upload(self, file):
+        return self.client.post(self.url, {"image": file}, format="multipart")
+
+    def test_upload_requires_login(self):
+        self.assertEqual(self.upload(make_image()).status_code, 401)
+
+    def test_other_user_cannot_upload(self):
+        self.client.force_authenticate(self.maria)
+        self.assertEqual(self.upload(make_image()).status_code, 403)
+        self.assertEqual(Photo.objects.count(), 0)
+
+    def test_author_can_upload_and_photo_shows_in_route(self):
+        self.client.force_authenticate(self.ivan)
+        r = self.upload(make_image())
+        self.assertEqual(r.status_code, 201)
+        self.assertIn("/media/route_photos/", r.data["image"])
+        detail = self.client.get(f"/api/routes/{self.route.id}/")
+        self.assertEqual(len(detail.data["photos"]), 1)
+
+    def test_non_image_rejected(self):
+        self.client.force_authenticate(self.ivan)
+        fake = SimpleUploadedFile(
+            "fake.png", "това не е снимка".encode(), content_type="image/png"
+        )
+        self.assertEqual(self.upload(fake).status_code, 400)
+        self.assertEqual(Photo.objects.count(), 0)
+
+    def test_svg_with_script_rejected(self):
+        self.client.force_authenticate(self.ivan)
+        svg = SimpleUploadedFile(
+            "x.png",
+            b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+            content_type="image/png",
+        )
+        self.assertEqual(self.upload(svg).status_code, 400)
+        self.assertEqual(Photo.objects.count(), 0)
+
+    def test_too_large_rejected(self):
+        self.client.force_authenticate(self.ivan)
+        with patch("routes.serializers.MAX_IMAGE_SIZE", 10):
+            r = self.upload(make_image())
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(Photo.objects.count(), 0)
+
+    def test_photo_limit(self):
+        self.client.force_authenticate(self.ivan)
+        with patch("routes.views.MAX_PHOTOS_PER_ROUTE", 1):
+            self.assertEqual(self.upload(make_image("a.png")).status_code, 201)
+            self.assertEqual(self.upload(make_image("b.png")).status_code, 400)
+        self.assertEqual(Photo.objects.count(), 1)
+
+    def test_author_can_delete_photo(self):
+        photo = Photo.objects.create(route=self.route, image=make_image())
+        self.client.force_authenticate(self.ivan)
+        r = self.client.delete(f"/api/routes/{self.route.id}/photos/{photo.id}/")
+        self.assertEqual(r.status_code, 204)
+        self.assertEqual(Photo.objects.count(), 0)
+
+    def test_other_user_cannot_delete_photo(self):
+        photo = Photo.objects.create(route=self.route, image=make_image())
+        self.client.force_authenticate(self.maria)
+        r = self.client.delete(f"/api/routes/{self.route.id}/photos/{photo.id}/")
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(Photo.objects.count(), 1)        
