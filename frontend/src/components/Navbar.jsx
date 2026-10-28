@@ -16,6 +16,7 @@ export default function Navbar() {
       <div>
         {username ? (
           <>
+            <Link to="/publish">Публикувай маршрут</Link>
             <span>Здравей, {username}</span>
             <button onClick={handleLogout}>Изход</button>
           </>
