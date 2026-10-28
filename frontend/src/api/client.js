@@ -8,4 +8,19 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// ако токенът е изтекъл: изчистваме входа и пращаме към страницата за вход
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const expired = error.response?.data?.code === "token_not_valid";
+    if (expired && localStorage.getItem("access")) {
+      localStorage.removeItem("access");
+      localStorage.removeItem("refresh");
+      localStorage.removeItem("username");
+      window.location.href = "/login";
+    }
+    return Promise.reject(error);
+  }
+);
+
 export default api;
