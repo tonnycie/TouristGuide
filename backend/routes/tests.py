@@ -1,6 +1,6 @@
 from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
-from .models import Route, Waypoint
+from .models import Review, Route, Waypoint
 
 
 class AuthTests(APITestCase):
@@ -130,4 +130,94 @@ class RouteApiTests(APITestCase):
         self.client.force_authenticate(self.ivan)
         r = self.client.delete(f"/api/routes/{route.id}/")
         self.assertEqual(r.status_code, 204)
-        self.assertEqual(Route.objects.count(), 0)        
+        self.assertEqual(Route.objects.count(), 0)     
+
+class ReviewApiTests(APITestCase):
+    def setUp(self):
+        self.ivan = User.objects.create_user("ivan", password="Tur1st!Pass2026")
+        self.maria = User.objects.create_user("maria", password="Tur1st!Pass2026")
+        self.petar = User.objects.create_user("petar", password="Tur1st!Pass2026")
+        self.route = Route.objects.create(author=self.ivan, title="Рила", destination="Рила")
+        Waypoint.objects.create(route=self.route, name="Паничище", latitude=42.2686, longitude=23.317)
+        self.url = f"/api/routes/{self.route.id}/reviews/"
+
+    def test_review_requires_login(self):
+        r = self.client.post(self.url, {"text": "Супер", "rating": 5}, format="json")
+        self.assertEqual(r.status_code, 401)
+
+    def test_create_review(self):
+        self.client.force_authenticate(self.maria)
+        r = self.client.post(self.url, {"text": "Супер", "rating": 5}, format="json")
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.data["author"], "maria")
+        self.assertEqual(Review.objects.count(), 1)
+
+    def test_rating_out_of_range_rejected(self):
+        self.client.force_authenticate(self.maria)
+        for bad in (0, 6):
+            r = self.client.post(self.url, {"text": "Ок", "rating": bad}, format="json")
+            self.assertEqual(r.status_code, 400)
+        self.assertEqual(Review.objects.count(), 0)
+
+    def test_duplicate_review_rejected(self):
+        self.client.force_authenticate(self.maria)
+        self.client.post(self.url, {"text": "Супер", "rating": 5}, format="json")
+        r = self.client.post(self.url, {"text": "Пак", "rating": 4}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(Review.objects.count(), 1)
+
+    def test_cannot_review_own_route(self):
+        self.client.force_authenticate(self.ivan)
+        r = self.client.post(self.url, {"text": "Моят", "rating": 5}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(Review.objects.count(), 0)
+
+    def test_list_reviews_is_public(self):
+        Review.objects.create(route=self.route, author=self.maria, text="Супер", rating=5)
+        r = self.client.get(self.url)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.data), 1)
+
+    def test_average_rating(self):
+        Review.objects.create(route=self.route, author=self.maria, text="Добро", rating=4)
+        Review.objects.create(route=self.route, author=self.petar, text="Супер", rating=5)
+        r = self.client.get(f"/api/routes/{self.route.id}/")
+        self.assertEqual(r.data["average_rating"], 4.5)
+        self.assertEqual(r.data["reviews_count"], 2)
+
+    def test_no_reviews_means_no_average(self):
+        r = self.client.get(f"/api/routes/{self.route.id}/")
+        self.assertIsNone(r.data["average_rating"])
+        self.assertEqual(r.data["reviews_count"], 0)
+
+    def test_xss_in_review_is_stripped(self):
+        self.client.force_authenticate(self.maria)
+        r = self.client.post(
+            self.url,
+            {"text": "<script>alert(1)</script>Страхотно", "rating": 5},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 201)
+        self.assertNotIn("<script>", r.data["text"])
+        self.assertNotIn("<", Review.objects.get().text)
+
+    def test_review_empty_after_strip_rejected(self):
+        self.client.force_authenticate(self.maria)
+        r = self.client.post(self.url, {"text": "<script></script>", "rating": 5}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(Review.objects.count(), 0)
+
+    def test_xss_in_route_fields_is_stripped(self):
+        self.client.force_authenticate(self.maria)
+        payload = {
+            "title": "<b>Хак</b><script>alert(1)</script>",
+            "destination": "<img src=x onerror=alert(1)>Варна",
+            "description": "<script>alert(2)</script>Описание",
+            "tips": "<i>съвет</i>",
+            "waypoints": [{"name": "<script>x</script>Точка", "latitude": 43.2, "longitude": 27.9}],
+        }
+        r = self.client.post("/api/routes/", payload, format="json")
+        self.assertEqual(r.status_code, 201)
+        for field in ("title", "destination", "description", "tips"):
+            self.assertNotIn("<", r.data[field])
+        self.assertNotIn("<", r.data["waypoints"][0]["name"])           
