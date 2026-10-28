@@ -318,3 +318,73 @@ class PhotoApiTests(APITestCase):
         r = self.client.delete(f"/api/routes/{self.route.id}/photos/{photo.id}/")
         self.assertEqual(r.status_code, 403)
         self.assertEqual(Photo.objects.count(), 1)        
+
+
+class SearchAndProfileTests(APITestCase):
+    def setUp(self):
+        self.ivan = User.objects.create_user("ivan", password="Tur1st!Pass2026")
+        self.maria = User.objects.create_user("maria", password="Tur1st!Pass2026")
+        self.petar = User.objects.create_user("petar", password="Tur1st!Pass2026")
+        self.rila = Route.objects.create(
+            author=self.ivan, title="Рилски езера", destination="Рила", description="Седемте езера"
+        )
+        self.sofia = Route.objects.create(
+            author=self.maria, title="Градска разходка", destination="София", description="Центърът"
+        )
+        self.sea = Route.objects.create(
+            author=self.ivan, title="Морето", destination="Варна", description="Плаж"
+        )
+        Review.objects.create(route=self.rila, author=self.maria, text="Супер", rating=5)
+        Review.objects.create(route=self.sofia, author=self.petar, text="Добре", rating=3)
+
+    def titles(self, response):
+        return [r["title"] for r in response.data]
+
+    def test_search_by_title(self):
+        r = self.client.get("/api/routes/", {"search": "езера"})
+        self.assertEqual(self.titles(r), ["Рилски езера"])
+
+    def test_search_ignores_case_for_cyrillic(self):
+        r = self.client.get("/api/routes/", {"search": "СОФИЯ"})
+        self.assertEqual(self.titles(r), ["Градска разходка"])
+
+    def test_search_no_results(self):
+        r = self.client.get("/api/routes/", {"search": "несъществуващо"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.titles(r), [])
+
+    def test_filter_by_author(self):
+        r = self.client.get("/api/routes/", {"author": "ivan"})
+        self.assertCountEqual(self.titles(r), ["Рилски езера", "Морето"])
+
+    def test_min_rating(self):
+        r = self.client.get("/api/routes/", {"min_rating": "4"})
+        self.assertEqual(self.titles(r), ["Рилски езера"])
+        r = self.client.get("/api/routes/", {"min_rating": "3"})
+        self.assertCountEqual(self.titles(r), ["Рилски езера", "Градска разходка"])
+
+    def test_invalid_min_rating_rejected(self):
+        r = self.client.get("/api/routes/", {"min_rating": "abc"})
+        self.assertEqual(r.status_code, 400)
+
+    def test_order_by_rating(self):
+        r = self.client.get("/api/routes/", {"ordering": "rating"})
+        self.assertEqual(self.titles(r), ["Рилски езера", "Градска разходка", "Морето"])
+
+    def test_filters_do_not_break_detail(self):
+        r = self.client.get(f"/api/routes/{self.rila.id}/", {"search": "нещо"})
+        self.assertEqual(r.status_code, 200)
+
+    def test_profile(self):
+        r = self.client.get("/api/users/ivan/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["username"], "ivan")
+        self.assertEqual(r.data["routes_count"], 2)
+        self.assertEqual(r.data["reviews_count"], 0)
+        self.assertNotIn("email", r.data)
+        r = self.client.get("/api/users/maria/")
+        self.assertEqual(r.data["routes_count"], 1)
+        self.assertEqual(r.data["reviews_count"], 1)
+
+    def test_profile_not_found(self):
+        self.assertEqual(self.client.get("/api/users/nikoi/").status_code, 404)        
