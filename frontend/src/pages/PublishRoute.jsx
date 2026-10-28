@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import api from "../api/client";
 import { formatError } from "../api/errors";
 import { useAuth } from "../context/AuthContext";
@@ -9,19 +9,55 @@ const MAX_FILE_SIZE = 5 * 1024 * 1024;
 const MAX_FILES = 10;
 
 export default function PublishRoute() {
+  const { id } = useParams(); // има стойност само при редакция
+  const isEdit = Boolean(id);
   const { username } = useAuth();
   const navigate = useNavigate();
+
   const [title, setTitle] = useState("");
   const [destination, setDestination] = useState("");
   const [description, setDescription] = useState("");
   const [tips, setTips] = useState("");
   const [waypoints, setWaypoints] = useState([]);
+  const [existingPhotos, setExistingPhotos] = useState([]);
   const [files, setFiles] = useState([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [createdId, setCreatedId] = useState(null);
+  const [loading, setLoading] = useState(isEdit);
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    if (!isEdit || !username) return;
+    api
+      .get(`/routes/${id}/`)
+      .then(({ data }) => {
+        if (data.author !== username) {
+          setLoadError("Можете да редактирате само собствените си маршрути.");
+          return;
+        }
+        setTitle(data.title);
+        setDestination(data.destination);
+        setDescription(data.description);
+        setTips(data.tips);
+        setWaypoints(
+          data.waypoints.map((w) => ({
+            name: w.name,
+            latitude: Number(w.latitude),
+            longitude: Number(w.longitude),
+          }))
+        );
+        setExistingPhotos(data.photos ?? []);
+      })
+      .catch((err) =>
+        setLoadError(err.response?.status === 404 ? "Маршрутът не съществува." : formatError(err))
+      )
+      .finally(() => setLoading(false));
+  }, [id, isEdit, username]);
 
   if (!username) return <Navigate to="/login" replace />;
+  if (loading) return <p>Зареждане...</p>;
+  if (loadError) return <p className="error">{loadError}</p>;
 
   const addPoint = (lat, lng) => {
     setWaypoints((prev) => [
@@ -48,6 +84,16 @@ export default function PublishRoute() {
     });
   };
 
+  const removePhoto = async (photoId) => {
+    if (!window.confirm("Да изтрия ли снимката?")) return;
+    try {
+      await api.delete(`/routes/${id}/photos/${photoId}/`);
+      setExistingPhotos((prev) => prev.filter((p) => p.id !== photoId));
+    } catch (err) {
+      setError(formatError(err));
+    }
+  };
+
   const handleFiles = (e) => {
     const selected = Array.from(e.target.files);
     const tooBig = selected.find((f) => f.size > MAX_FILE_SIZE);
@@ -56,8 +102,8 @@ export default function PublishRoute() {
       e.target.value = "";
       return;
     }
-    if (selected.length > MAX_FILES) {
-      setError(`Максимум ${MAX_FILES} снимки.`);
+    if (existingPhotos.length + selected.length > MAX_FILES) {
+      setError(`Максимум ${MAX_FILES} снимки на маршрут.`);
       e.target.value = "";
       return;
     }
@@ -81,11 +127,13 @@ export default function PublishRoute() {
         tips,
         waypoints: waypoints.map((w) => ({
           name: w.name,
-          latitude: w.latitude.toFixed(6), // бекендът пази 6 знака след запетаята
+          latitude: w.latitude.toFixed(6),
           longitude: w.longitude.toFixed(6),
         })),
       };
-      const { data: route } = await api.post("/routes/", payload);
+      const { data: route } = isEdit
+        ? await api.put(`/routes/${id}/`, payload)
+        : await api.post("/routes/", payload);
 
       const failed = [];
       for (const file of files) {
@@ -99,7 +147,7 @@ export default function PublishRoute() {
       }
 
       if (failed.length > 0) {
-        setError(`Маршрутът е публикуван, но не се качиха: ${failed.join(", ")}.`);
+        setError(`Маршрутът е записан, но не се качиха: ${failed.join(", ")}.`);
         setCreatedId(route.id);
       } else {
         navigate(`/routes/${route.id}`);
@@ -113,7 +161,7 @@ export default function PublishRoute() {
 
   return (
     <form onSubmit={handleSubmit} className="publish-form">
-      <h2>Публикуване на маршрут</h2>
+      <h2>{isEdit ? "Редакция на маршрут" : "Публикуване на маршрут"}</h2>
 
       <label className="field">
         Заглавие
@@ -141,7 +189,7 @@ export default function PublishRoute() {
       <p className="muted">
         Кликнете върху картата, за да добавите точка. Редът на точките е редът на маршрута.
       </p>
-      <WaypointMap waypoints={waypoints} onAddPoint={addPoint} />
+      <WaypointMap waypoints={waypoints} onAddPoint={addPoint} autoFit={isEdit} />
 
       <ol className="waypoint-list">
         {waypoints.map((w, i) => (
@@ -162,8 +210,22 @@ export default function PublishRoute() {
         ))}
       </ol>
 
+      {isEdit && existingPhotos.length > 0 && (
+        <>
+          <h3>Текущи снимки</h3>
+          <div className="gallery">
+            {existingPhotos.map((p) => (
+              <div key={p.id} className="gallery-item">
+                <img src={p.image} alt="" />
+                <button type="button" onClick={() => removePhoto(p.id)}>Изтрий</button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
       <label className="field">
-        Снимки (по желание, до 10, всяка до 5 MB; JPEG, PNG или WebP)
+        {isEdit ? "Добавяне на снимки" : "Снимки"} (по желание, всяка до 5 MB; JPEG, PNG или WebP)
         <input
           type="file"
           accept="image/jpeg,image/png,image/webp"
@@ -173,10 +235,10 @@ export default function PublishRoute() {
       </label>
 
       {error && <p className="error">{error}</p>}
-      {createdId && <Link to={`/routes/${createdId}`}>Към публикувания маршрут</Link>}
+      {createdId && <Link to={`/routes/${createdId}`}>Към маршрута</Link>}
       <div>
         <button type="submit" disabled={saving || createdId !== null}>
-          {saving ? "Публикуване..." : "Публикувай"}
+          {saving ? "Запазване..." : isEdit ? "Запази промените" : "Публикувай"}
         </button>
       </div>
     </form>

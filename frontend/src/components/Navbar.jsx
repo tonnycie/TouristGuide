@@ -17,7 +17,7 @@ export default function Navbar() {
         {username ? (
           <>
             <Link to="/publish">Публикувай маршрут</Link>
-            <span>Здравей, {username}</span>
+            <Link to={`/users/${username}`}>Моят профил</Link>
             <button onClick={handleLogout}>Изход</button>
           </>
         ) : (

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import api from "../api/client";
 import { formatError } from "../api/errors";
 import { useAuth } from "../context/AuthContext";
@@ -9,12 +9,14 @@ import WaypointMap from "../components/WaypointMap";
 export default function RouteDetail() {
   const { id } = useParams();
   const { username } = useAuth();
+  const navigate = useNavigate();
   const [route, setRoute] = useState(null);
   const [reviews, setReviews] = useState([]);
   const [error, setError] = useState("");
   const [text, setText] = useState("");
   const [rating, setRating] = useState(5);
   const [formError, setFormError] = useState("");
+  const [deleteError, setDeleteError] = useState("");
 
   const load = async () => {
     try {
@@ -45,9 +47,22 @@ export default function RouteDetail() {
     }
   };
 
+  const deleteRoute = async () => {
+    if (!window.confirm("Сигурни ли сте, че искате да изтриете маршрута? Това не може да се отмени.")) {
+      return;
+    }
+    try {
+      await api.delete(`/routes/${id}/`);
+      navigate("/");
+    } catch (err) {
+      setDeleteError(formatError(err));
+    }
+  };
+
   if (error) return <p className="error">{error}</p>;
   if (!route) return <p>Зареждане...</p>;
 
+  const isAuthor = username === route.author;
   const alreadyReviewed = reviews.some((r) => r.author === username);
   const photos = route.photos ?? [];
 
@@ -56,12 +71,21 @@ export default function RouteDetail() {
       <Link to="/">← Всички маршрути</Link>
       <h1>{route.title}</h1>
       <p className="muted">
-        Дестинация: {route.destination} · автор: {route.author}
+        Дестинация: {route.destination} · автор:{" "}
+        <Link to={`/users/${route.author}`}>{route.author}</Link>
       </p>
       <p>
         <Stars value={route.average_rating} />{" "}
         <span className="muted">({route.reviews_count} отзива)</span>
       </p>
+
+      {isAuthor && (
+        <div className="actions">
+          <Link to={`/routes/${route.id}/edit`} className="button-link">Редактирай</Link>{" "}
+          <button type="button" className="danger" onClick={deleteRoute}>Изтрий маршрута</button>
+          {deleteError && <p className="error">{deleteError}</p>}
+        </div>
+      )}
 
       <h3>Лични впечатления</h3>
       <p className="pre">{route.description || "Няма описание."}</p>
@@ -69,7 +93,7 @@ export default function RouteDetail() {
       <h3>Съвети за пътуване</h3>
       <p className="pre">{route.tips || "Няма съвети."}</p>
 
-            <h3>Маршрут на картата</h3>
+      <h3>Маршрут на картата</h3>
       <WaypointMap waypoints={route.waypoints} autoFit />
 
       {photos.length > 0 && (
@@ -114,13 +138,13 @@ export default function RouteDetail() {
           <Link to="/login">Влезте</Link>, за да оставите отзив.
         </p>
       )}
-      {username && username === route.author && (
+      {isAuthor && (
         <p className="muted">Това е вашият маршрут, не можете да го оценявате.</p>
       )}
-      {username && username !== route.author && alreadyReviewed && (
+      {username && !isAuthor && alreadyReviewed && (
         <p className="muted">Вече сте оставили отзив за този маршрут.</p>
       )}
-      {username && username !== route.author && !alreadyReviewed && (
+      {username && !isAuthor && !alreadyReviewed && (
         <form onSubmit={submitReview} className="review-form">
           <h4>Вашият отзив</h4>
           <label>

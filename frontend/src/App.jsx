@@ -5,6 +5,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import RouteDetail from "./pages/RouteDetail";
 import PublishRoute from "./pages/PublishRoute";
+import Profile from "./pages/Profile";
 
 export default function App() {
   return (
@@ -18,6 +19,8 @@ export default function App() {
           <Route path="/register" element={<Register />} />
           <Route path="/routes/:id" element={<RouteDetail />} />
           <Route path="/publish" element={<PublishRoute />} />
+          <Route path="/users/:username" element={<Profile />} />
+          <Route path="/routes/:id/edit" element={<PublishRoute />} />  
         </Routes>
       </main>
     </>
