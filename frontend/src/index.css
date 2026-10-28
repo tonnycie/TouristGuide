@@ -145,3 +145,42 @@ button {
   border-radius: 6px;
   object-fit: cover;
 }
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.filters input[type="text"] {
+  flex: 1;
+  min-width: 220px;
+  padding: 8px;
+}
+.filters select {
+  padding: 8px;
+}
+.actions {
+  margin: 12px 0;
+}
+.button-link {
+  display: inline-block;
+  padding: 8px 14px;
+  background: #e8eef5;
+  border: 1px solid #999;
+  border-radius: 3px;
+  color: #000;
+  text-decoration: none;
+}
+.danger {
+  background: #b00020;
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+}
+.gallery-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}

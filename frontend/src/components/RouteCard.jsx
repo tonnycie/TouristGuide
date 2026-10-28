@@ -8,7 +8,8 @@ export default function RouteCard({ route }) {
         <Link to={`/routes/${route.id}`}>{route.title}</Link>
       </h3>
       <p className="muted">
-        Дестинация: {route.destination} · автор: {route.author}
+        Дестинация: {route.destination} · автор:{" "}
+        <Link to={`/users/${route.author}`}>{route.author}</Link>
       </p>
       <p>
         <Stars value={route.average_rating} />{" "}
