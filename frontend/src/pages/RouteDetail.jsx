@@ -4,6 +4,7 @@ import api from "../api/client";
 import { formatError } from "../api/errors";
 import { useAuth } from "../context/AuthContext";
 import Stars from "../components/Stars";
+import WaypointMap from "../components/WaypointMap";
 
 export default function RouteDetail() {
   const { id } = useParams();
@@ -48,6 +49,7 @@ export default function RouteDetail() {
   if (!route) return <p>Зареждане...</p>;
 
   const alreadyReviewed = reviews.some((r) => r.author === username);
+  const photos = route.photos ?? [];
 
   return (
     <div>
@@ -66,6 +68,22 @@ export default function RouteDetail() {
 
       <h3>Съвети за пътуване</h3>
       <p className="pre">{route.tips || "Няма съвети."}</p>
+
+            <h3>Маршрут на картата</h3>
+      <WaypointMap waypoints={route.waypoints} autoFit />
+
+      {photos.length > 0 && (
+        <>
+          <h3>Снимки</h3>
+          <div className="gallery">
+            {photos.map((p) => (
+              <a key={p.id} href={p.image} target="_blank" rel="noreferrer">
+                <img src={p.image} alt={`Снимка към ${route.title}`} />
+              </a>
+            ))}
+          </div>
+        </>
+      )}
 
       <h3>Междинни точки</h3>
       <ol>
