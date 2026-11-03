@@ -2,9 +2,9 @@ from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
 import shutil
 import tempfile
-from io import BytesIO
+from io import BytesIO, StringIO
 from unittest.mock import patch
-
+from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from PIL import Image
@@ -388,3 +388,28 @@ class SearchAndProfileTests(APITestCase):
 
     def test_profile_not_found(self):
         self.assertEqual(self.client.get("/api/users/nikoi/").status_code, 404)        
+
+
+class SeedDemoTests(APITestCase):
+    def test_seed_creates_data_and_is_repeatable(self):
+        call_command("seed_demo", stdout=StringIO())
+        self.assertEqual(Route.objects.count(), 5)
+        self.assertEqual(Review.objects.count(), 11)
+        self.assertEqual(User.objects.filter(username__startswith="demo_").count(), 4)
+        call_command("seed_demo", stdout=StringIO())  # втори път не дублира
+        self.assertEqual(Route.objects.count(), 5)
+
+    def test_reset_recreates_data(self):
+        call_command("seed_demo", stdout=StringIO())
+        call_command("seed_demo", "--reset", stdout=StringIO())
+        self.assertEqual(Route.objects.count(), 5)
+        self.assertEqual(User.objects.filter(username__startswith="demo_").count(), 4)
+
+    def test_demo_users_can_login(self):
+        call_command("seed_demo", stdout=StringIO())
+        r = self.client.post(
+            "/api/auth/login/",
+            {"username": "demo_maria", "password": "Demo!Pass2026"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200)        
